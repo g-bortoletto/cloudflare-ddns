@@ -133,6 +133,15 @@ def commitRecord(ip):
             time.sleep(5)
             return
         base_domain_name = response["result"]["name"]
+        configured_fqdns = set()
+        dns_records = cf_api(
+            "zones/"
+            + option["zone_id"]
+            + "/dns_records?per_page=100&type="
+            + ip["type"],
+            "GET",
+            option,
+        )
         for subdomain in subdomains:
             try:
                 name = subdomain["name"].lower().strip()
@@ -144,6 +153,7 @@ def commitRecord(ip):
             # Check if name provided is a reference to the root domain
             if name != "" and name != "@":
                 fqdn = name + "." + base_domain_name
+            configured_fqdns.add(fqdn)
             record = {
                 "type": ip["type"],
                 "name": fqdn,
@@ -151,14 +161,6 @@ def commitRecord(ip):
                 "proxied": proxied,
                 "ttl": ttl,
             }
-            dns_records = cf_api(
-                "zones/"
-                + option["zone_id"]
-                + "/dns_records?per_page=100&type="
-                + ip["type"],
-                "GET",
-                option,
-            )
             identifier = None
             modified = False
             duplicate_ids = []
@@ -206,6 +208,25 @@ def commitRecord(ip):
                         "DELETE",
                         option,
                     )
+
+        # Remove DNS records that are no longer in the config
+        if purgeUnknownRecords and dns_records is not None:
+            for r in dns_records["result"]:
+                if r["name"] not in configured_fqdns:
+                    identifier = str(r["id"])
+                    print(
+                        "🗑️ Deleting removed subdomain: "
+                        + r["name"]
+                        + " ("
+                        + identifier
+                        + ")"
+                    )
+                    response = cf_api(
+                        "zones/" + option["zone_id"] + "/dns_records/" + identifier,
+                        "DELETE",
+                        option,
+                    )
+
     return True
 
 
